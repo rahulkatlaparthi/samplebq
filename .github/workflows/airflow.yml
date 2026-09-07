@@ -1,0 +1,79 @@
+name: Airflow DAG Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'dags/**/*.py'
+      - 'dags/*.py'
+
+jobs:
+  airflow:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed Python files
+        id: changed_py
+        run: |
+          echo "Checking for changed Python files..."
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED_FILES=$(git ls-tree -r --name-only "$AFTER" | \
+              grep -E '^dags/.*\.py$' || true)
+          else
+            CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" | \
+              grep -E '^dags/.*\.py$' || true)
+          fi
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Python files changed."
+            exit 0
+          fi
+
+          echo "Changed Python files:"
+          echo "$CHANGED_FILES"
+
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Validate all changed Python files
+        run: |
+          CHANGED_FILES="${{ steps.changed_py.outputs.files }}"
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Python files to validate."
+            exit 0
+          fi
+
+          while IFS= read -r FILE
+          do
+            if [ -z "$FILE" ]; then
+              continue
+            fi
+
+            echo "========================================"
+            echo "Checking: $FILE"
+            echo "========================================"
+
+            python -m py_compile "$FILE"
+
+            echo "Successfully validated: $FILE"
+
+          done <<< "$CHANGED_FILES"
+
+      - name: List all Airflow DAG Python files
+        run: |
+          echo "All Python files in dags/:"
+
+          find dags -type f -name "*.py" -print
+
