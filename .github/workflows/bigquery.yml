@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'sql/**/*.sql'
+      - 'sql/*.sql'
 
 jobs:
   deploy-bigquery:
@@ -15,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -25,11 +26,24 @@ jobs:
       - name: Setup Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Run changed SQL files
+      - name: Find changed SQL files
+        id: changed_sql
         run: |
           echo "Checking for changed SQL files..."
 
-          CHANGED_FILES=$(git diff --name-only HEAD^ HEAD -- 'sql/**/*.sql')
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+
+          echo "Before commit: $BEFORE"
+          echo "After commit:  $AFTER"
+
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "Initial commit detected."
+
+            CHANGED_FILES=$(git ls-tree -r --name-only "$AFTER" | grep -E '^sql/.*\.sql$' || true)
+          else
+            CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" | grep -E '^sql/.*\.sql$' || true)
+          fi
 
           if [ -z "$CHANGED_FILES" ]; then
             echo "No SQL files changed."
@@ -39,10 +53,29 @@ jobs:
           echo "Changed SQL files:"
           echo "$CHANGED_FILES"
 
-          for FILE in $CHANGED_FILES
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Run changed SQL files
+        run: |
+          CHANGED_FILES="${{ steps.changed_sql.outputs.files }}"
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No SQL files to execute."
+            exit 0
+          fi
+
+          echo "Starting BigQuery deployment..."
+
+          while IFS= read -r FILE
           do
+            if [ -z "$FILE" ]; then
+              continue
+            fi
+
             echo "========================================"
-            echo "Running: $FILE"
+            echo "Running SQL file: $FILE"
             echo "========================================"
 
             bq query \
@@ -51,4 +84,7 @@ jobs:
               < "$FILE"
 
             echo "Completed: $FILE"
-          done
+            echo ""
+
+          done <<< "$CHANGED_FILES"
+
