@@ -1,0 +1,54 @@
+name: BigQuery SQL Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'sql/**/*.sql'
+
+jobs:
+  deploy-bigquery:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run changed SQL files
+        run: |
+          echo "Checking for changed SQL files..."
+
+          CHANGED_FILES=$(git diff --name-only HEAD^ HEAD -- 'sql/**/*.sql')
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No SQL files changed."
+            exit 0
+          fi
+
+          echo "Changed SQL files:"
+          echo "$CHANGED_FILES"
+
+          for FILE in $CHANGED_FILES
+          do
+            echo "========================================"
+            echo "Running: $FILE"
+            echo "========================================"
+
+            bq query \
+              --use_legacy_sql=false \
+              --project_id=qwiklabs-gcp-00-38c5c3a6722c \
+              < "$FILE"
+
+            echo "Completed: $FILE"
+          done
