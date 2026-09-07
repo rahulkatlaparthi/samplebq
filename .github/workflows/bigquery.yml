@@ -1,15 +1,15 @@
-name: BigQuery SQL Deployment
+name: Airflow DAG Deployment
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'sql/**/*.sql'
-      - 'sql/*.sql'
+      - 'dags/**/*.py'
+      - 'dags/*.py'
 
 jobs:
-  deploy-bigquery:
+  deploy-airflow:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,47 +26,47 @@ jobs:
       - name: Setup Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Find changed SQL files
-        id: changed_sql
+      - name: Find changed Python files
+        id: changed_py
         run: |
-          echo "Checking for changed SQL files..."
+          echo "Checking for changed Python files..."
 
           BEFORE="${{ github.event.before }}"
           AFTER="${{ github.event.after }}"
 
-          echo "Before commit: $BEFORE"
-          echo "After commit:  $AFTER"
+          echo "Before: $BEFORE"
+          echo "After:  $AFTER"
 
           if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             echo "Initial commit detected."
 
-            CHANGED_FILES=$(git ls-tree -r --name-only "$AFTER" | grep -E '^sql/.*\.sql$' || true)
+            CHANGED_FILES=$(git ls-tree -r --name-only "$AFTER" | \
+              grep -E '^dags/.*\.py$' || true)
           else
-            CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" | grep -E '^sql/.*\.sql$' || true)
+            CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" | \
+              grep -E '^dags/.*\.py$' || true)
           fi
 
           if [ -z "$CHANGED_FILES" ]; then
-            echo "No SQL files changed."
+            echo "No Python DAG files changed."
             exit 0
           fi
 
-          echo "Changed SQL files:"
+          echo "Changed Python files:"
           echo "$CHANGED_FILES"
 
           echo "files<<EOF" >> "$GITHUB_OUTPUT"
           echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Run changed SQL files
+      - name: Validate changed Python files
         run: |
-          CHANGED_FILES="${{ steps.changed_sql.outputs.files }}"
+          CHANGED_FILES="${{ steps.changed_py.outputs.files }}"
 
           if [ -z "$CHANGED_FILES" ]; then
-            echo "No SQL files to execute."
+            echo "No Python files to validate."
             exit 0
           fi
-
-          echo "Starting BigQuery deployment..."
 
           while IFS= read -r FILE
           do
@@ -75,16 +75,47 @@ jobs:
             fi
 
             echo "========================================"
-            echo "Running SQL file: $FILE"
+            echo "Validating: $FILE"
             echo "========================================"
 
-            bq query \
-              --use_legacy_sql=false \
-              --project_id=qwiklabs-gcp-00-38c5c3a6722c \
-              < "$FILE"
+            python -m py_compile "$FILE"
 
-            echo "Completed: $FILE"
-            echo ""
+            echo "Validation successful: $FILE"
 
           done <<< "$CHANGED_FILES"
 
+      - name: Deploy changed DAG files to Composer
+        run: |
+          CHANGED_FILES="${{ steps.changed_py.outputs.files }}"
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No DAG files to deploy."
+            exit 0
+          fi
+
+          while IFS= read -r FILE
+          do
+            if [ -z "$FILE" ]; then
+              continue
+            fi
+
+            echo "========================================"
+            echo "Deploying: $FILE"
+            echo "========================================"
+
+            gsutil cp "$FILE" \
+              "gs://asia-southeast1-cccg-cd06b905-bucket/dags/"
+
+            echo "Deployed: $FILE"
+
+          done <<< "$CHANGED_FILES"
+
+      - name: Deployment complete
+        run: |
+          echo "========================================"
+          echo "Airflow DAG deployment completed"
+          echo "Composer Environment: cccg"
+          echo "Region: asia-southeast1"
+          echo "DAG Bucket:"
+          echo "gs://asia-southeast1-cccg-cd06b905-bucket/dags/"
+          echo "========================================"
