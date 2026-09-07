@@ -9,3 +9,4 @@ CREATE TABLE IF NOT EXISTS `qwiklabs-gcp-00-38c5c3a6722c.demo_dataset.customers`
   created_at TIMESTAMP
 );
   
+ 
