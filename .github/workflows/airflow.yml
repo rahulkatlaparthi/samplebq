@@ -9,7 +9,7 @@ on:
       - 'dags/*.py'
 
 jobs:
-  deploy-airflow:
+  airflow:
     runs-on: ubuntu-latest
 
     steps:
@@ -17,14 +17,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
-
-      - name: Setup Google Cloud CLI
-        uses: google-github-actions/setup-gcloud@v2
 
       - name: Find changed Python files
         id: changed_py
@@ -34,12 +26,7 @@ jobs:
           BEFORE="${{ github.event.before }}"
           AFTER="${{ github.event.after }}"
 
-          echo "Before: $BEFORE"
-          echo "After:  $AFTER"
-
           if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "Initial commit detected."
-
             CHANGED_FILES=$(git ls-tree -r --name-only "$AFTER" | \
               grep -E '^dags/.*\.py$' || true)
           else
@@ -48,7 +35,7 @@ jobs:
           fi
 
           if [ -z "$CHANGED_FILES" ]; then
-            echo "No Python DAG files changed."
+            echo "No Python files changed."
             exit 0
           fi
 
@@ -59,7 +46,7 @@ jobs:
           echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Validate changed Python files
+      - name: Validate all changed Python files
         run: |
           CHANGED_FILES="${{ steps.changed_py.outputs.files }}"
 
@@ -75,47 +62,18 @@ jobs:
             fi
 
             echo "========================================"
-            echo "Validating: $FILE"
+            echo "Checking: $FILE"
             echo "========================================"
 
             python -m py_compile "$FILE"
 
-            echo "Validation successful: $FILE"
+            echo "Successfully validated: $FILE"
 
           done <<< "$CHANGED_FILES"
 
-      - name: Deploy changed DAG files to Composer
+      - name: List all Airflow DAG Python files
         run: |
-          CHANGED_FILES="${{ steps.changed_py.outputs.files }}"
+          echo "All Python files in dags/:"
 
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "No DAG files to deploy."
-            exit 0
-          fi
+          find dags -type f -name "*.py" -print
 
-          while IFS= read -r FILE
-          do
-            if [ -z "$FILE" ]; then
-              continue
-            fi
-
-            echo "========================================"
-            echo "Deploying: $FILE"
-            echo "========================================"
-
-            gsutil cp "$FILE" \
-              "gs://asia-southeast1-cccg-cd06b905-bucket/dags/"
-
-            echo "Deployed: $FILE"
-
-          done <<< "$CHANGED_FILES"
-
-      - name: Deployment complete
-        run: |
-          echo "========================================"
-          echo "Airflow DAG deployment completed"
-          echo "Composer Environment: cccg"
-          echo "Region: asia-southeast1"
-          echo "DAG Bucket:"
-          echo "gs://asia-southeast1-cccg-cd06b905-bucket/dags/"
-          echo "========================================"
